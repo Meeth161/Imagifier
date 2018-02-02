@@ -10,6 +10,7 @@ import android.support.annotation.NonNull;
 import android.support.v4.content.FileProvider;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
@@ -54,6 +55,7 @@ public class MainActivity extends AppCompatActivity {
     String mCurrentPhotoPath;
     String imageFileName;
     File photoFile;
+    Uri photoURI;
 
     FirebaseAuth mAuth;
     FirebaseAuth.AuthStateListener mAuthListener;
@@ -105,7 +107,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                     // Continue only if the File was successfully created
                     if (photoFile != null) {
-                        Uri photoURI = FileProvider.getUriForFile(MainActivity.this,
+                        photoURI = FileProvider.getUriForFile(MainActivity.this,
                                 "com.example.android.fileprovider",
                                 photoFile);
                         takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, photoURI);
@@ -139,31 +141,36 @@ public class MainActivity extends AppCompatActivity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
 
         if (requestCode == REQUEST_IMAGE_CAPTURE && resultCode == RESULT_OK) {
-            //Bundle extras = data.getExtras();
-            //Bitmap imageBitmap = (Bitmap) extras.get("data");
-            //ivMain.setImageBitmap(imageBitmap);
 
-            Uri file = Uri.fromFile(new File(mCurrentPhotoPath));
-            StorageReference imageRef = mRef.child("images/"+file.getLastPathSegment());
-            uploadTask = imageRef.putFile(file);
+            new MyTask().execute();
 
-// Register observers to listen for when the download is done or if it fails
-            uploadTask.addOnFailureListener(new OnFailureListener() {
-                @Override
-                public void onFailure(@NonNull Exception exception) {
-                    Toast.makeText(MainActivity.this, "Upload Failed", Toast.LENGTH_SHORT).show();
-                }
-            }).addOnSuccessListener(new OnSuccessListener<UploadTask.TaskSnapshot>() {
-                @Override
-                public void onSuccess(UploadTask.TaskSnapshot taskSnapshot) {
-                    // taskSnapshot.getMetadata() contains file metadata such as size, content-type, and download URL.
-                   Uri downloadUrl = taskSnapshot.getDownloadUrl();
-                   String url = downloadUrl.toString();
-                   new watson().execute(url);
-                }
-            });
-        } else {
-            Toast.makeText(this, "Failed", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private class MyTask extends AsyncTask<Void, Void, Void> {
+
+        @Override
+        protected Void doInBackground(Void... voids) {
+
+            VisualRecognition service = new VisualRecognition(
+                    VisualRecognition.VERSION_DATE_2016_05_20
+            );
+            service.setApiKey("8e6ba90332ed26d2f0f842ff527264ed7cc6d34c");
+
+            InputStream imagesStream = null;
+            try {
+                imagesStream = new FileInputStream(mCurrentPhotoPath);
+            } catch (FileNotFoundException e) {
+                e.printStackTrace();
+            }
+            ClassifyOptions classifyOptions = new ClassifyOptions.Builder()
+                    .imagesFile(imagesStream)
+                    .imagesFilename(imageFileName+".jpg")
+                    .build();
+            ClassifiedImages result = service.classify(classifyOptions).execute();
+            System.out.println(result);
+
+            return null;
         }
     }
 
@@ -181,42 +188,6 @@ public class MainActivity extends AppCompatActivity {
         // Save a file: path for use with ACTION_VIEW intents
         mCurrentPhotoPath = image.getAbsolutePath();
         return image;
-    }
-
-    /*void clasifyImage() {
-        VisualRecognition service = new VisualRecognition(VisualRecognition.VERSION_DATE_2016_05_20);
-        service.setApiKey("<api-key>");
-
-        System.out.println("Classify an image");
-
-        try {
-            ClassifyOptions options = new ClassifyOptions.Builder()
-                    .imagesFile(new File(mCurrentPhotoPath))
-                    .build();
-            ClassifiedImages result = service.classify(options).execute();
-            System.out.println(result);
-        } catch (FileNotFoundException e) {
-            Toast.makeText(this, "" + e.getMessage(), Toast.LENGTH_SHORT).show();
-        }
-
-    }*/
-
-    class watson extends AsyncTask<String, Void, Void> {
-
-        @Override
-        protected Void doInBackground(String... strings) {
-            VisualRecognition service = new VisualRecognition(VisualRecognition.VERSION_DATE_2016_05_20);
-            service.setApiKey("8e6ba90332ed26d2f0f842ff527264ed7cc6d34c");
-
-            System.out.println("Classify an image");
-
-            ClassifyOptions options = new ClassifyOptions.Builder()
-                    .parameters("\"url\" : " + strings[0])
-                    .build();
-            ClassifiedImages result = service.classify(options).execute();
-            System.out.println(result);
-            return null;
-        }
     }
 
     @Override
