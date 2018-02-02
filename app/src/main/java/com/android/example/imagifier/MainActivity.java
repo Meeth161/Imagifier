@@ -170,6 +170,7 @@ public class MainActivity extends AppCompatActivity {
             ClassifiedImages result = service.classify(classifyOptions).execute();
             System.out.println(result);
 
+
             return null;
         }
     }
