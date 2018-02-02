@@ -6,14 +6,27 @@ import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Environment;
 import android.provider.MediaStore;
+import android.support.annotation.NonNull;
 import android.support.v4.content.FileProvider;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.view.Menu;
+import android.view.MenuItem;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.google.android.gms.auth.api.signin.GoogleSignIn;
+import com.google.android.gms.auth.api.signin.GoogleSignInClient;
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions;
+import com.google.android.gms.tasks.OnFailureListener;
+import com.google.android.gms.tasks.OnSuccessListener;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.storage.FirebaseStorage;
+import com.google.firebase.storage.StorageReference;
+import com.google.firebase.storage.UploadTask;
 import com.ibm.watson.developer_cloud.visual_recognition.v3.VisualRecognition;
 import com.ibm.watson.developer_cloud.visual_recognition.v3.model.ClassifiedImages;
 import com.ibm.watson.developer_cloud.visual_recognition.v3.model.ClassifyOptions;
@@ -42,10 +55,38 @@ public class MainActivity extends AppCompatActivity {
     String imageFileName;
     File photoFile;
 
+    FirebaseAuth mAuth;
+    FirebaseAuth.AuthStateListener mAuthListener;
+    StorageReference mRef;
+    UploadTask uploadTask;
+
+    GoogleSignInClient mGoogleSignInClient;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        mRef = FirebaseStorage.getInstance().getReference();
+
+        mAuth = FirebaseAuth.getInstance();
+        mAuthListener = new FirebaseAuth.AuthStateListener() {
+            @Override
+            public void onAuthStateChanged(@NonNull FirebaseAuth firebaseAuth) {
+                FirebaseUser user = firebaseAuth.getCurrentUser();
+                if(user == null) {
+                    startActivity(new Intent(MainActivity.this, Login.class));
+                    finish();
+                }
+            }
+        };
+
+        GoogleSignInOptions gso = new GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                .requestIdToken(getString(R.string.default_web_client_id))
+                .requestEmail()
+                .build();
+
+        mGoogleSignInClient = GoogleSignIn.getClient(MainActivity.this, gso);
 
         ivMain = (ImageView) findViewById(R.id.iv_main);
         tvNewSearch = (TextView) findViewById(R.id.tv_newSearch);
@@ -76,12 +117,51 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        getMenuInflater().inflate(R.menu.main, menu);
+        return super.onCreateOptionsMenu(menu);
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        int id = item.getItemId();
+
+        if(id == R.id.action_logout) {
+            mGoogleSignInClient.signOut();
+            mAuth.signOut();
+            return true;
+        }
+
+        return false;
+    }
+
+    @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+
         if (requestCode == REQUEST_IMAGE_CAPTURE && resultCode == RESULT_OK) {
             //Bundle extras = data.getExtras();
             //Bitmap imageBitmap = (Bitmap) extras.get("data");
             //ivMain.setImageBitmap(imageBitmap);
-            new watson().execute(mCurrentPhotoPath);
+
+            Uri file = Uri.fromFile(new File(mCurrentPhotoPath));
+            StorageReference imageRef = mRef.child("images/"+file.getLastPathSegment());
+            uploadTask = imageRef.putFile(file);
+
+// Register observers to listen for when the download is done or if it fails
+            uploadTask.addOnFailureListener(new OnFailureListener() {
+                @Override
+                public void onFailure(@NonNull Exception exception) {
+                    Toast.makeText(MainActivity.this, "Upload Failed", Toast.LENGTH_SHORT).show();
+                }
+            }).addOnSuccessListener(new OnSuccessListener<UploadTask.TaskSnapshot>() {
+                @Override
+                public void onSuccess(UploadTask.TaskSnapshot taskSnapshot) {
+                    // taskSnapshot.getMetadata() contains file metadata such as size, content-type, and download URL.
+                   Uri downloadUrl = taskSnapshot.getDownloadUrl();
+                   String url = downloadUrl.toString();
+                   new watson().execute(url);
+                }
+            });
         } else {
             Toast.makeText(this, "Failed", Toast.LENGTH_SHORT).show();
         }
@@ -120,22 +200,37 @@ public class MainActivity extends AppCompatActivity {
         }
 
     }*/
-}
 
-class watson extends AsyncTask<String, Void, Void> {
+    class watson extends AsyncTask<String, Void, Void> {
+
+        @Override
+        protected Void doInBackground(String... strings) {
+            VisualRecognition service = new VisualRecognition(VisualRecognition.VERSION_DATE_2016_05_20);
+            service.setApiKey("8e6ba90332ed26d2f0f842ff527264ed7cc6d34c");
+
+            System.out.println("Classify an image");
+
+            ClassifyOptions options = new ClassifyOptions.Builder()
+                    .parameters("\"url\" : " + strings[0])
+                    .build();
+            ClassifiedImages result = service.classify(options).execute();
+            System.out.println(result);
+            return null;
+        }
+    }
 
     @Override
-    protected Void doInBackground(String... strings) {
-        VisualRecognition service = new VisualRecognition(VisualRecognition.VERSION_DATE_2016_05_20);
-        service.setApiKey("8e6ba90332ed26d2f0f842ff527264ed7cc6d34c");
+    protected void onStart() {
+        super.onStart();
+        mAuth.addAuthStateListener(mAuthListener);
+    }
 
-        System.out.println("Classify an image");
-
-        ClassifyOptions options = new ClassifyOptions.Builder()
-                .parameters("{\"url\" : \"https://pbs.twimg.com/profile_images/3342699268/305afa644af457a6517e17f116c2adc7_400x400.jpeg\"}")
-                .build();
-        ClassifiedImages result = service.classify(options).execute();
-        System.out.println(result);
-        return null;
+    @Override
+    protected void onStop() {
+        super.onStop();
+        if(mAuthListener != null) {
+            mAuth.removeAuthStateListener(mAuthListener);
+        }
     }
 }
+
